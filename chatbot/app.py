@@ -11,7 +11,13 @@ st.title("🌐 Web Search Chatbot")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-llm = ChatOllama(model="llama3.2")
+
+@st.cache_resource
+def get_llm():
+    return ChatOllama(model="llama3.2")
+
+
+llm = get_llm()
 
 
 def web_search(query, max_results=4):
@@ -23,7 +29,8 @@ def web_search(query, max_results=4):
                     f"{r['title']}: {r['body']}\nSource: {r['href']}"
                 )
         return "\n\n".join(results) if results else "No relevant web results found."
-    except Exception:
+    except Exception as e:
+        print(f"Web search error: {e}")
         return "Web search unavailable right now."
 
 
@@ -41,23 +48,30 @@ if question:
         {"role": "user", "content": question}
     )
 
-    with st.spinner("Thinking..."):
-        try:
-            web_context = web_search(question)
+    with st.spinner("Thinking.."):
+        web_context = web_search(question)
 
-            history_text = "\n".join(
-                f"{m['role']}: {m['content']}"
-                for m in st.session_state.messages[-6:-1]
-            )
+    history_text = "\n".join(
+        f"{m['role']}: {m['content']}"
+        for m in st.session_state.messages[-6:-1]
+    )
 
-            prompt = f"""
-You are a helpful, knowledgeable AI assistant with access to your own broad
+    prompt = f"""
+You are a friendly, helpful AI assistant with access to your own broad
 knowledge AND some live web search results below.
 
-Use the web search results if they are relevant and helpful. If they are not
-relevant, irrelevant, or empty, ignore them and answer using your own
-knowledge instead. Never refuse to answer just because the web results don't
-cover it — only say you don't know if you genuinely have no idea.
+Guidelines:
+- If the message is a greeting, casual chat, or looks like a typo of a
+  common word or greeting (e.g. "hlw", "helo", "thx", "sup"), just respond
+  naturally as if you understood it. Do NOT ask the user to clarify unless
+  the message is genuinely ambiguous or ONLY makes sense with more context.
+- Use the web search results if they are relevant and helpful.
+- If the web results are irrelevant or empty, ignore them and answer using
+  your own knowledge instead.
+- Never refuse to answer just because the web results don't cover it — only
+  say you don't know if you genuinely have no idea.
+- Keep answers clear, direct, and conversational.
+
 
 Recent conversation:
 {history_text}
@@ -68,21 +82,21 @@ Web search results:
 Question:
 {question}
 
-Answer clearly and directly:
+Answer:
 """
 
-            response = llm.invoke(prompt)
-            answer = response.content
-
-            with st.chat_message("assistant"):
-                st.markdown(answer)
-
-            st.session_state.messages.append(
-                {"role": "assistant", "content": answer}
+    try:
+        with st.chat_message("assistant"):
+            answer = st.write_stream(
+                chunk.content for chunk in llm.stream(prompt)
             )
 
-            with st.expander(" Web Search Results"):
-                st.markdown(web_context)
+        st.session_state.messages.append(
+            {"role": "assistant", "content": answer}
+        )
 
-        except Exception as e:
-            st.error(f"Error: {e}")
+        with st.expander("🔍 Web Search Results"):
+            st.markdown(web_context)
+
+    except Exception as e:
+        st.error(f"Error: {e}")
